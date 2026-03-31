@@ -33,6 +33,9 @@ optimizer = make_t2i_unet_distill_optimizer(
     cfg=cfg,
 )
 
+feature_keys = [f"d{i}" for i in range(len(student.unet.down_blocks))] + \
+               [f"u{i}" for i in range(len(student.unet.up_blocks))]
+
 trained_student = train_t2i_unet_distill(
     cfg=cfg,
     student=student,

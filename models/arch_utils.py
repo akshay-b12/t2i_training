@@ -72,3 +72,70 @@ def register_unet_feature_hooks(unet: nn.Module, store: dict):
 def remove_hooks(handles):
     for h in handles:
         h.remove()
+
+@torch.no_grad()
+def build_feature_adapters_from_dummy(
+    student,
+    teacher_unet,
+    image_size: int,
+    batch_size: int = 1,
+    seq_len: int = 77,
+    device: str = "cuda",
+):
+    """
+    Runs one synthetic forward on both teacher and student U-Nets to infer block feature channels.
+    Assumes:
+      - student is StudentModelFlow
+      - teacher_unet is a UNet2DConditionModel-like teacher
+      - no middle block distillation
+    """
+    device = torch.device(device)
+
+    student_store = ActivationStore()
+    teacher_store = ActivationStore()
+
+    student_handles = register_unet_feature_hooks(student.unet, student_store)
+    teacher_handles = register_unet_feature_hooks(teacher_unet, teacher_store)
+
+    latent_h = image_size // student.vae_scale_factor
+    latent_w = image_size // student.vae_scale_factor
+
+    # Dummy inputs
+    x = torch.randn(
+        batch_size,
+        student.unet.config.in_channels,
+        latent_h,
+        latent_w,
+        device=device,
+        dtype=next(student.unet.parameters()).dtype,
+    )
+    t = student.scheduler.timesteps[:batch_size].to(device=device)
+    text_dim = student.unet.config.cross_attention_dim
+    enc = torch.randn(
+        batch_size,
+        seq_len,
+        text_dim,
+        device=device,
+        dtype=next(student.unet.parameters()).dtype,
+    )
+
+    _ = student.unet(x, t, encoder_hidden_states=enc).sample
+    _ = teacher_unet(
+        x.to(dtype=next(teacher_unet.parameters()).dtype),
+        t.to(device=device),
+        encoder_hidden_states=enc.to(dtype=next(teacher_unet.parameters()).dtype),
+    ).sample
+
+    channel_map = {}
+    feature_keys = sorted(set(student_store.keys()).intersection(set(teacher_store.keys())))
+
+    for key in feature_keys:
+        s = student_store[key]
+        t_ = teacher_store[key]
+        channel_map[key] = (s.shape[1], t_.shape[1])
+
+    remove_hooks(student_handles)
+    remove_hooks(teacher_handles)
+
+    adapters = FeatureAdapterBank(channel_map).to(device)
+    return adapters, feature_keys, channel_map
