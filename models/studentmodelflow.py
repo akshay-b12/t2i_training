@@ -4,6 +4,52 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
+import torch
+import torch.nn as nn
+
+from diffusers import AutoencoderKL, UNet2DConditionModel, FlowMatchEulerDiscreteScheduler
+
+
+@dataclass
+class StudentFlowConfig:
+    pretrained_unet_id: Optional[str] = None
+    pretrained_unet_subfolder: str = "unet"
+
+    pretrained_student_vae_id: Optional[str] = None
+    pretrained_student_vae_subfolder: Optional[str] = None
+
+    latent_channels: int = 16
+    latent_scaling_factor: float = 1.0
+
+    cross_attention_dim: int = 768
+    sample_size: Optional[int] = None
+
+    down_block_types: Tuple[str, ...] = (
+        "CrossAttnDownBlock2D",
+        "CrossAttnDownBlock2D",
+        "CrossAttnDownBlock2D",
+        "DownBlock2D",
+    )
+    up_block_types: Tuple[str, ...] = (
+        "UpBlock2D",
+        "CrossAttnUpBlock2D",
+        "CrossAttnUpBlock2D",
+        "CrossAttnUpBlock2D",
+    )
+    block_out_channels: Tuple[int, ...] = (320, 640, 1280, 1280)
+    layers_per_block: int = 2
+    attention_head_dim: Tuple[int, ...] = (5, 10, 20, 20)
+    norm_num_groups: int = 32
+    use_linear_projection: bool = False
+
+    # FlowMatch scheduler settings
+    num_train_timesteps: int = 1000
+    shift: float = 1.0
+    use_dynamic_shifting: bool = False
+    
 def create_student_flow_scheduler(cfg: StudentFlowConfig) -> FlowMatchEulerDiscreteScheduler:
     scheduler = FlowMatchEulerDiscreteScheduler(
         num_train_timesteps=cfg.num_train_timesteps,
